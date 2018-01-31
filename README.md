@@ -18,8 +18,8 @@ BIOS 仅仅从磁盘中加载 1st sector 到 0x7c00, 在这 512 bytes 要做下面三个基本操作.
 
 #### Kernel 的初始化
 
-* 重建GDT, 开启分段机制
-* 开启分页机制
+* 重建GDT, 开启分段机制 [done]
+* 开启分页机制 [doing]
  
 
 ## Kernel 设计规则

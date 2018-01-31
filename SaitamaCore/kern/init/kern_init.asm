@@ -7,6 +7,7 @@ MINI_KERNEL_DATA:
 	core_init_address dd mini_kernel_init
 	core_gdt_limit dw 31
 	core_gdt_address dd 0x7e00
+	core_page_directory_address dd 0x7e00
 
 str_kern_01 db "kernel init stage 1 done!"
 
@@ -119,6 +120,18 @@ xor esp, esp
 
 mov eax, str_kern_01+0x40000
 call put_string
+
+; >>> setup Paging, Paging is base on Segmentation
+; !!! Paging mechanism is divided into two parts: the Page Directory and the Page Table.
+setup_paging_mechanism:
+	mov ecx, 1024 
+	mov ebx, 0
+.clear_page_dir:
+	mov dword [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address + ebx], 0
+	inc ebx
+	loop .clear_page_dir
+
+
 
 ; ============= vga kit =============
 
