@@ -5,7 +5,7 @@ MINI_KERNEL_INIT_ADDRESS equ MINI_KERNEL_LOAD_ADDRESS+mini_kernel_init
 MINI_KERNEL_DATA:
 	core_size dd mini_kernel_init_end
 	core_init_address dd mini_kernel_init
-	core_gdt_limit dw 0
+	core_gdt_limit dw 31
 	core_gdt_address dd 0x7e00
 
 str_kern_01 db "kernel init stage 1 done!"
@@ -77,28 +77,29 @@ add esp, 4*4+2*4
 
 ; >>> retain the old code segment descripter
 ; if you want to rebuid or reload a new GDT, you must retain the old code segment descripter, at the same descripter
-; >>> save the current same descripter index of GDT that needed be loaded to the end of it.
+; >>> save the current same descripter index of GDT which needed to be loaded to the end of it.
 xor ebx, ebx
 mov ebx, cs
 and ebx, 0xfffffff8
 add ebx, [MINI_KERNEL_DATA_ADDRESS+core_gdt_address] ; ebx is the address of old code segment descripter index 
 xor ecx, ecx
-mov ecx, [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit]
+mov word cx, [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit]
+inc ecx
 add ecx, [MINI_KERNEL_DATA_ADDRESS+core_gdt_address] ; ecx is the end position of current GDT
 mov eax, [ebx]
 mov [ecx], eax
 mov eax, [ebx+4]
 mov [ecx+4], eax
-; >>> mov the old code segment descripter to the same position(index) of the GDT needed to be loaded.
+; >>> mov the old code segment descripter to the same position(index) of the GDT which needed to be loaded.
 mov eax, cs
 and eax, 0xfffffff8
 mov dword edi, [MINI_KERNEL_DATA_ADDRESS+core_gdt_address]
-add edi, eax
+add edi, eax ; edi is the reserved position of new GDT
 sub esp, 0x8
 sgdt [ss:esp]
 mov dword esi, [ss:esp+2] 
 add esp, 0x8
-add esi, eax
+add esi, eax ; edi the corresponding index position of old GDT
 mov dword eax, [esi]
 mov [edi], eax 
 mov dword eax, [esi+4]

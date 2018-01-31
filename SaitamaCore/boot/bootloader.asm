@@ -24,7 +24,7 @@ lgdt [default_gdt+0x7c00]
 
 ; >>> extend extra GDT's item
 sgdt [default_gdt+0x7c00]
-; >>> change 32-bit physical address of gdt with seg:seg-offset
+; >>> change 32-bit physical address of GDT with seg:seg-offset address mode
 mov dword eax, [default_gdt+0x7c00+2]
 xor edx, edx
 mov ebx, 16
@@ -33,7 +33,7 @@ mov ds, eax
 mov ebx, edx
 ; >>> set extra GDT position
 xor edx, edx
-mov word dx, [cs:default_gdt+0x7c00]
+mov word dx, [cs:default_gdt+0x7c00] ; GDT limit
 add dword ebx, edx
 inc ebx
 %if 0
