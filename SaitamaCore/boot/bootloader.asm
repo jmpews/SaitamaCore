@@ -1,6 +1,6 @@
 %include "macros.inc"
 
-core_base_address equ 0x00040000
+core_base_address equ 0x00800000
 core_start_sector equ 0x0000001
 
 jmp short bootloader_start

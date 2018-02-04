@@ -1,4 +1,6 @@
-MINI_KERNEL_LOAD_ADDRESS equ 0x40000
+%include "macros.inc"
+
+MINI_KERNEL_LOAD_ADDRESS equ 0x800000
 MINI_KERNEL_DATA_ADDRESS equ MINI_KERNEL_LOAD_ADDRESS
 MINI_KERNEL_INIT_ADDRESS equ MINI_KERNEL_LOAD_ADDRESS+mini_kernel_init
 
@@ -7,13 +9,15 @@ MINI_KERNEL_DATA:
 	core_init_address dd mini_kernel_init
 	core_gdt_limit dw 31
 	core_gdt_address dd 0x7e00
-	core_page_directory_address dd 0x7e00
+	core_page_directory_address dd 0x10000
+	kernel_space_pde_offset dd 0xc00
 
-str_kern_01 db "kernel init stage 1 done!"
+str_kern_01 db "kernel init stage 1 done!", 0
+str_kern_02 db "kernel init stage 2 done!", 0
 
 temp_data:
 
-times 64-($-$$) db 0
+times 0x80-($-$$) db 0
 
 [bits 32]
 
@@ -109,29 +113,135 @@ mov [edi+4], eax
 mov word [MINI_KERNEL_DATA_ADDRESS+0x8], 39
 lgdt [MINI_KERNEL_DATA_ADDRESS+0x8]
 
-jmp dword 0x0018:gdt_reload_done+0x40000 ; use new cs segment selector
-gdt_reload_done:
+jmp dword 0x0018:gdt_reload_done_stage1+MINI_KERNEL_LOAD_ADDRESS ; use new cs segment selector
+gdt_reload_done_stage1:
 ; >>> init the with new GDT
 mov eax, 0x8
 mov ds, eax
+mov es, eax
+mov gs, eax
 mov eax, 0x20
 mov ss, eax
 xor esp, esp
 
-mov eax, str_kern_01+0x40000
-call put_string
+mov eax, str_kern_01+MINI_KERNEL_DATA_ADDRESS
+call dword 0x18:MINI_KERNEL_LOAD_ADDRESS+put_string
 
+; Q: why use Paging?
+; A: **manage physical memory properly.**
 ; >>> setup Paging, Paging is base on Segmentation
 ; !!! Paging mechanism is divided into two parts: the Page Directory and the Page Table.
+ida_debug_nop
 setup_paging_mechanism:
-	mov ecx, 1024 
-	mov ebx, 0
+mov ecx, 1024 
+mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
 .clear_page_dir:
-	mov dword [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address + ebx], 0
-	inc ebx
+	mov dword [ebx], 0
+	add ebx, 4
 	loop .clear_page_dir
+mov ecx, 1024*1024
+.clear_page_table:
+	mov dword [ebx], 0
+	add ebx, 4
+	loop .clear_page_table
+; >>> init the page directory entry of kernel space
+.create_kernel_pde:
+	mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+	mov eax, ebx
+	add eax, 0x1000
+	or eax, PG_US_U|PG_RW_W|PG_P
+	mov dword [ebx+0], eax ; first page table
+	mov dword [ebx+0xc00], eax ; 0xc0000000 - 0xffffffff is kernel space, just a convention
 
+	; QA: need to access PAGE directory in th Paging Mode
+	; >>> init the page directory address in Paging Mode
+	mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+	mov eax, ebx
+	or eax, PG_US_U|PG_RW_W|PG_P
+	mov [ebx+1023*4], eax
+; >>> init the page table entry of kernel space
+.create_kernel_pte:
+	; for kernel low 1MB space
+	mov eax, 1024*1024/0x1000
+	mov ecx, eax
+	xor edi, edi 
+	xor ebx, ebx
+	mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+	add ebx, 0x1000
+	xor eax, eax
+	or eax, PG_US_U|PG_RW_W|PG_P
+.create_kernel_pte_loop:
+	mov [ebx+edi*4], eax
+	add eax, 0x1000
+	inc edi
+	loop .create_kernel_pte_loop
 
+mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+mov eax, MINI_KERNEL_LOAD_ADDRESS
+shr eax, 22
+shl eax, 2
+add ebx, eax
+mov eax, 0x12000
+or eax, PG_US_U|PG_RW_W|PG_P
+mov dword [ebx], eax
+mov ebx, 0x12000
+mov eax, MINI_KERNEL_LOAD_ADDRESS
+shl eax, 10
+shr eax, 22
+add ebx, eax
+xor edi, edi
+mov ecx,256
+mov eax, MINI_KERNEL_LOAD_ADDRESS
+or eax, PG_US_U|PG_RW_W|PG_P
+.create_kernel_code_map:
+	mov [ebx+edi*4], eax
+	add eax, 0x1000
+	inc edi
+	loop .create_kernel_code_map
+
+%if 0
+; >>> kernel space shared with process
+.create_other_kernel_pde:
+	mov eax, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+	mov ebx, eax
+	add eax, 0x2000
+	or eax, PG_US_U|PG_RW_W|PG_P
+	mov ecx, [MINI_KERNEL_DATA_ADDRESS+kernel_space_pde_offset]
+	add ecx, 4
+.create_other_kernel_pde_loop:
+	mov [ebx+ecx], eax
+	add ecx, 4
+	add eax, 0x1000
+	cmp ecx, 0x1000-4
+	jl .create_other_kernel_pde_loop
+%endif
+
+; >>> start enable Paging
+mov eax, [MINI_KERNEL_DATA_ADDRESS+core_page_directory_address]
+mov cr3, eax
+
+mov eax, cr0
+or eax, 0x80000000
+mov cr0, eax
+
+.reload_gdt_descripter_with_new_address:
+sgdt [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit]
+mov ebx, [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit+2]
+mov eax, [MINI_KERNEL_DATA_ADDRESS+kernel_space_pde_offset]
+shr eax, 2
+shl eax, 22
+or dword [ds:ebx+4*8+4], eax
+add dword [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit+2], eax
+lgdt [MINI_KERNEL_DATA_ADDRESS+core_gdt_limit]
+
+jmp dword 0x18:MINI_KERNEL_LOAD_ADDRESS+gdt_reload_done_stage2
+gdt_reload_done_stage2:
+
+mov eax, str_kern_02+MINI_KERNEL_DATA_ADDRESS
+call dword 0x18:MINI_KERNEL_LOAD_ADDRESS+put_string
+nop
+nop
+nop
 
 ; ============= vga kit =============
 
